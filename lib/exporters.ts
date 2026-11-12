@@ -1,4 +1,5 @@
-import { Worksheet, Table, Relation, SqlDialect, TABLE_COLORS } from '../types/database';
+import { Worksheet, Table, Relation, SqlDialect, TABLE_COLORS, Point } from '../types/database';
+import { generateDefaultOrthogonalPoints, pointsToSvgPath } from './orthogonalRouter';
 
 export function generateSQL(worksheet: Worksheet): string {
   const { dialect, tables, relations } = worksheet;
@@ -376,27 +377,22 @@ export function exportToSvg(worksheet: Worksheet): string {
         pathD = `M ${p1.x} ${p1.y} C ${c1x} ${p1.y}, ${c2x} ${p2.y}, ${p2.x} ${p2.y}`;
       }
     } else {
-      // Orthogonal 90° bends
-      if (isSelf) {
-        const outX = Math.max(p1.x, p2.x) + 35 + bend;
-        pathD = `M ${p1.x} ${p1.y} L ${outX} ${p1.y} L ${outX} ${p2.y} L ${p2.x} ${p2.y}`;
-        midX = outX;
-      } else if (sSide === 'right' && tSide === 'left' && p2.x > p1.x + 30) {
-        const mx = (p1.x + p2.x) / 2 + bend;
-        pathD = `M ${p1.x} ${p1.y} L ${mx} ${p1.y} L ${mx} ${p2.y} L ${p2.x} ${p2.y}`;
-        midX = mx;
-      } else if (sSide === 'left' && tSide === 'right' && p2.x < p1.x - 30) {
-        const mx = (p1.x + p2.x) / 2 + bend;
-        pathD = `M ${p1.x} ${p1.y} L ${mx} ${p1.y} L ${mx} ${p2.y} L ${p2.x} ${p2.y}`;
-        midX = mx;
+      // Orthogonal 90° bends (draw.io style)
+      if (rel.waypoints && rel.waypoints.length >= 2) {
+        pathD = pointsToSvgPath(rel.waypoints);
+        const midPt = rel.waypoints[Math.floor(rel.waypoints.length / 2)];
+        midX = midPt.x;
+        midY = midPt.y;
       } else {
-        const mx = (p1.x + p2.x) / 2 + bend;
-        pathD = `M ${p1.x} ${p1.y} L ${mx} ${p1.y} L ${mx} ${p2.y} L ${p2.x} ${p2.y}`;
-        midX = mx;
+        const pts = generateDefaultOrthogonalPoints(p1, sSide, p2, tSide, bend, isSelf);
+        pathD = pointsToSvgPath(pts);
+        const midPt = pts[Math.floor(pts.length / 2)];
+        midX = midPt.x;
+        midY = midPt.y;
       }
     }
 
-    svgParts.push(`<path d="${pathD}" stroke="${lineColor}" class="rel-line" opacity="0.9" marker-end="url(#arrow-target)" />`);
+    svgParts.push(`<path d="${pathD}" stroke="${lineColor}" class="rel-line" opacity="0.9" />`);
 
     // Cardinality badge in middle of curve
     const cardText = rel.cardinality === 'one-to-one' ? '1:1' : rel.cardinality === 'many-to-many' ? 'N:M' : '1:N';

@@ -5,9 +5,19 @@ import {
   Relation,
   Worksheet,
   ThemeMode,
+  Point,
 } from '../types/database';
 import { TableCard } from './TableCard';
 import { SelectionTarget } from './PropertyBar';
+import {
+  generateDefaultOrthogonalPoints,
+  cleanAndMergeWaypoints,
+  moveOrthogonalSegment,
+  moveWaypoint,
+  pointsToSvgPath,
+  isNear,
+  MIN_STUB,
+} from '../lib/orthogonalRouter';
 
 interface CanvasProps {
   worksheet: Worksheet;
@@ -75,11 +85,33 @@ export const Canvas: React.FC<CanvasProps> = ({
     startMouseY: number;
   } | null>(null);
 
-  // Bend dragging state
+  // Bend dragging state (legacy corridor slider)
   const draggingBendRef = useRef<{
     relationId: string;
     initialBend: number;
     startMouseX: number;
+  } | null>(null);
+
+  // Draw.io Orthogonal Segment / Waypoint dragging state
+  const draggingSegmentRef = useRef<{
+    relationId: string;
+    segmentIndex: number;
+    initialPoints: Point[];
+    isVertical: boolean;
+    startMouseX: number;
+    startMouseY: number;
+    sSide: 'left' | 'right';
+    tSide: 'left' | 'right';
+  } | null>(null);
+
+  const draggingWaypointRef = useRef<{
+    relationId: string;
+    waypointIndex: number;
+    initialPoints: Point[];
+    startMouseX: number;
+    startMouseY: number;
+    sSide: 'left' | 'right';
+    tSide: 'left' | 'right';
   } | null>(null);
 
   const rafRef = useRef<number | null>(null);
@@ -216,6 +248,82 @@ export const Canvas: React.FC<CanvasProps> = ({
         });
       }
 
+      // 2b. Real-time Orthogonal Segment Dragging (draw.io style)
+      if (draggingSegmentRef.current) {
+        const {
+          relationId,
+          segmentIndex,
+          initialPoints,
+          isVertical,
+          startMouseX,
+          startMouseY,
+          sSide,
+          tSide,
+        } = draggingSegmentRef.current;
+        const currentZoom = zoomRef.current;
+
+        const currentP1 = initialPoints[segmentIndex];
+        const newCoord = isVertical
+          ? currentP1.x + (e.clientX - startMouseX) / currentZoom
+          : currentP1.y + (e.clientY - startMouseY) / currentZoom;
+
+        const updatedPoints = moveOrthogonalSegment(
+          initialPoints,
+          segmentIndex,
+          newCoord,
+          sSide,
+          tSide
+        );
+
+        if (rafRef.current) cancelAnimationFrame(rafRef.current);
+
+        rafRef.current = requestAnimationFrame(() => {
+          onUpdateWorksheet((prev) => ({
+            ...prev,
+            relations: prev.relations.map((r) =>
+              r.id === relationId ? { ...r, waypoints: updatedPoints } : r
+            ),
+          }));
+        });
+      }
+
+      // 2c. Real-time Waypoint Vertex Dragging
+      if (draggingWaypointRef.current) {
+        const {
+          relationId,
+          waypointIndex,
+          initialPoints,
+          startMouseX,
+          startMouseY,
+          sSide,
+          tSide,
+        } = draggingWaypointRef.current;
+        const currentZoom = zoomRef.current;
+        const initPt = initialPoints[waypointIndex];
+        const newX = initPt.x + (e.clientX - startMouseX) / currentZoom;
+        const newY = initPt.y + (e.clientY - startMouseY) / currentZoom;
+
+        const updatedPoints = moveWaypoint(
+          initialPoints,
+          waypointIndex,
+          newX,
+          newY,
+          sSide,
+          tSide
+        );
+
+        if (rafRef.current) cancelAnimationFrame(rafRef.current);
+
+        rafRef.current = requestAnimationFrame(() => {
+          onUpdateWorksheet((prev) => ({
+            ...prev,
+            relations: prev.relations.map((r) =>
+              r.id === relationId ? { ...r, waypoints: updatedPoints } : r
+            ),
+          }));
+        });
+      }
+
       // 3. Canvas Panning
       if (isPanningRef.current) {
         const dx = e.clientX - lastPanPosRef.current.x;
@@ -243,6 +351,36 @@ export const Canvas: React.FC<CanvasProps> = ({
       if (draggingBendRef.current) {
         onSnapshot(worksheetRef.current);
         draggingBendRef.current = null;
+      }
+      if (draggingSegmentRef.current) {
+        const { relationId, sSide, tSide } = draggingSegmentRef.current;
+        const currentRel = worksheetRef.current.relations.find((r) => r.id === relationId);
+        if (currentRel?.waypoints) {
+          const finalCleaned = cleanAndMergeWaypoints(currentRel.waypoints, sSide, tSide);
+          onUpdateWorksheet((prev) => ({
+            ...prev,
+            relations: prev.relations.map((r) =>
+              r.id === relationId ? { ...r, waypoints: finalCleaned } : r
+            ),
+          }));
+        }
+        onSnapshot(worksheetRef.current);
+        draggingSegmentRef.current = null;
+      }
+      if (draggingWaypointRef.current) {
+        const { relationId, sSide, tSide } = draggingWaypointRef.current;
+        const currentRel = worksheetRef.current.relations.find((r) => r.id === relationId);
+        if (currentRel?.waypoints) {
+          const finalCleaned = cleanAndMergeWaypoints(currentRel.waypoints, sSide, tSide);
+          onUpdateWorksheet((prev) => ({
+            ...prev,
+            relations: prev.relations.map((r) =>
+              r.id === relationId ? { ...r, waypoints: finalCleaned } : r
+            ),
+          }));
+        }
+        onSnapshot(worksheetRef.current);
+        draggingWaypointRef.current = null;
       }
       if (isPanningRef.current) {
         isPanningRef.current = false;
@@ -379,6 +517,52 @@ export const Canvas: React.FC<CanvasProps> = ({
       relationId: relation.id,
       initialBend: relation.bendOffset || 0,
       startMouseX: e.clientX,
+    };
+  };
+
+  // Start dragging an orthogonal segment (draw.io style interactive line adjustments)
+  const handleStartDragSegment = (
+    e: React.MouseEvent,
+    relationId: string,
+    segmentIndex: number,
+    points: Point[],
+    isVertical: boolean,
+    sSide: 'left' | 'right',
+    tSide: 'left' | 'right'
+  ) => {
+    e.stopPropagation();
+    e.preventDefault();
+    draggingSegmentRef.current = {
+      relationId,
+      segmentIndex,
+      initialPoints: points,
+      isVertical,
+      startMouseX: e.clientX,
+      startMouseY: e.clientY,
+      sSide,
+      tSide,
+    };
+  };
+
+  // Start dragging a waypoint vertex
+  const handleStartDragWaypoint = (
+    e: React.MouseEvent,
+    relationId: string,
+    waypointIndex: number,
+    points: Point[],
+    sSide: 'left' | 'right',
+    tSide: 'left' | 'right'
+  ) => {
+    e.stopPropagation();
+    e.preventDefault();
+    draggingWaypointRef.current = {
+      relationId,
+      waypointIndex,
+      initialPoints: points,
+      startMouseX: e.clientX,
+      startMouseY: e.clientY,
+      sSide,
+      tSide,
     };
   };
 
@@ -537,17 +721,17 @@ export const Canvas: React.FC<CanvasProps> = ({
   // Background style
   const canvasBgStyle = isDark
     ? {
-        backgroundColor: '#0b1120',
-        backgroundImage: `radial-gradient(circle, #334155 1px, transparent 1px)`,
-        backgroundSize: `${24 * zoom}px ${24 * zoom}px`,
-        backgroundPosition: `${pan.x}px ${pan.y}px`,
-      }
+      backgroundColor: '#0b1120',
+      backgroundImage: `radial-gradient(circle, #334155 1px, transparent 1px)`,
+      backgroundSize: `${24 * zoom}px ${24 * zoom}px`,
+      backgroundPosition: `${pan.x}px ${pan.y}px`,
+    }
     : {
-        backgroundColor: '#ffffff',
-        backgroundImage: `linear-gradient(to right, #e2e8f0 1px, transparent 1px), linear-gradient(to bottom, #e2e8f0 1px, transparent 1px)`,
-        backgroundSize: `${20 * zoom}px ${20 * zoom}px`,
-        backgroundPosition: `${pan.x}px ${pan.y}px`,
-      };
+      backgroundColor: '#ffffff',
+      backgroundImage: `linear-gradient(to right, #e2e8f0 1px, transparent 1px), linear-gradient(to bottom, #e2e8f0 1px, transparent 1px)`,
+      backgroundSize: `${20 * zoom}px ${20 * zoom}px`,
+      backgroundPosition: `${pan.x}px ${pan.y}px`,
+    };
 
   const selectedRelId = selection?.type === 'relation' ? selection.relationId : null;
   const selectedTableId = selection?.type === 'table' ? selection.tableId : null;
@@ -619,6 +803,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             let pathD = '';
             let handlePos = { x: 0, y: 0 };
             let cardPos = { x: 0, y: 0 };
+            let activePoints: Point[] = [];
 
             if (routing === 'bezier') {
               if (isSelf) {
@@ -636,46 +821,28 @@ export const Canvas: React.FC<CanvasProps> = ({
                 handlePos = cardPos;
               }
             } else {
-              // Draw.io style straight lines with 90° bends (No arrows)
-              if (isSelf) {
-                const outX = Math.max(p1.x, p2.x) + 40 + bend;
-                pathD = `M ${p1.x} ${p1.y} L ${outX} ${p1.y} L ${outX} ${p2.y} L ${p2.x} ${p2.y}`;
-                handlePos = { x: outX, y: (p1.y + p2.y) / 2 };
-                cardPos = { x: outX, y: (p1.y + p2.y) / 2 };
-              } else if (sSide === 'right' && tSide === 'left') {
-                if (p2.x > p1.x + 30) {
-                  const midX = (p1.x + p2.x) / 2 + bend;
-                  pathD = `M ${p1.x} ${p1.y} L ${midX} ${p1.y} L ${midX} ${p2.y} L ${p2.x} ${p2.y}`;
-                  handlePos = { x: midX, y: (p1.y + p2.y) / 2 };
-                  cardPos = { x: midX, y: (p1.y + p2.y) / 2 };
-                } else {
-                  const sOut = p1.x + 25 + Math.max(0, bend);
-                  const tOut = p2.x - 25 - Math.max(0, -bend);
-                  const midY = (p1.y + p2.y) / 2;
-                  pathD = `M ${p1.x} ${p1.y} L ${sOut} ${p1.y} L ${sOut} ${midY} L ${tOut} ${midY} L ${tOut} ${p2.y} L ${p2.x} ${p2.y}`;
-                  handlePos = { x: (sOut + tOut) / 2, y: midY };
-                  cardPos = handlePos;
+              // Draw.io style orthogonal lines with interactive segment dragging & waypoint generation
+              if (rel.waypoints && rel.waypoints.length >= 2) {
+                // If tables moved, adapt the start and end points to anchor coordinates and maintain 90-degree angles
+                const pts = [...rel.waypoints];
+                pts[0] = { x: p1.x, y: p1.y };
+                if (pts.length >= 2) {
+                  // Keep first segment orthogonal
+                  pts[1] = { x: pts[1].x, y: p1.y };
                 }
-              } else if (sSide === 'left' && tSide === 'right') {
-                if (p2.x < p1.x - 30) {
-                  const midX = (p1.x + p2.x) / 2 + bend;
-                  pathD = `M ${p1.x} ${p1.y} L ${midX} ${p1.y} L ${midX} ${p2.y} L ${p2.x} ${p2.y}`;
-                  handlePos = { x: midX, y: (p1.y + p2.y) / 2 };
-                  cardPos = { x: midX, y: (p1.y + p2.y) / 2 };
-                } else {
-                  const sOut = p1.x - 25 + Math.min(0, bend);
-                  const tOut = p2.x + 25 + Math.max(0, bend);
-                  const midY = (p1.y + p2.y) / 2;
-                  pathD = `M ${p1.x} ${p1.y} L ${sOut} ${p1.y} L ${sOut} ${midY} L ${tOut} ${midY} L ${tOut} ${p2.y} L ${p2.x} ${p2.y}`;
-                  handlePos = { x: (sOut + tOut) / 2, y: midY };
-                  cardPos = handlePos;
+                pts[pts.length - 1] = { x: p2.x, y: p2.y };
+                if (pts.length >= 3) {
+                  // Keep last segment orthogonal
+                  pts[pts.length - 2] = { x: pts[pts.length - 2].x, y: p2.y };
                 }
+                activePoints = cleanAndMergeWaypoints(pts, sSide, tSide);
               } else {
-                const outX = Math.max(p1.x, p2.x) + 35 + bend;
-                pathD = `M ${p1.x} ${p1.y} L ${outX} ${p1.y} L ${outX} ${p2.y} L ${p2.x} ${p2.y}`;
-                handlePos = { x: outX, y: (p1.y + p2.y) / 2 };
-                cardPos = handlePos;
+                activePoints = generateDefaultOrthogonalPoints(p1, sSide, p2, tSide, bend, isSelf);
               }
+
+              pathD = pointsToSvgPath(activePoints);
+              const midIdx = Math.floor(activePoints.length / 2);
+              cardPos = activePoints[midIdx] || { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
             }
 
             const lineColor = rel.color || (isDark ? '#38bdf8' : '#2563eb');
@@ -718,28 +885,114 @@ export const Canvas: React.FC<CanvasProps> = ({
                   onMouseLeave={() => setHoveredRelationId(null)}
                 />
 
-                {/* Interactive Bend Distance Drag Handle (draw.io style) */}
-                {routing === 'orthogonal' && (isHovered || isSelectedRel) && (
+                {/* Bezier bend handle */}
+                {routing === 'bezier' && (isHovered || isSelectedRel) && (
                   <g
                     transform={`translate(${handlePos.x}, ${handlePos.y})`}
                     onMouseDown={(e) => handleStartDragBend(e, rel)}
                     className="cursor-ew-resize select-none"
                   >
-                    <title>Drag to change corridor distance (draw.io style)</title>
+                    <title>Drag to adjust curve</title>
                     <circle
-                      r="7"
-                      fill={isDark ? '#0284c7' : '#0284c7'}
+                      r="6"
+                      fill="#0284c7"
                       stroke="#ffffff"
                       strokeWidth="2"
-                      className="shadow-md hover:scale-125 transition-transform"
+                      className="shadow hover:scale-125 transition-transform"
                     />
-                    <path
-                      d="M -3 0 L 3 0 M -1 -2 L -3 0 L -1 2 M 1 -2 L 3 0 L 1 2"
-                      stroke="#ffffff"
-                      strokeWidth="1.2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
+                  </g>
+                )}
+
+                {/* Draw.io Orthogonal Segment Midpoint Drag Handles (Generate new waypoints on drag) */}
+                {routing === 'orthogonal' && (isHovered || isSelectedRel) && activePoints.length >= 2 && (
+                  <g className="orthogonal-segment-handles">
+                    {activePoints.slice(0, -1).map((ptA, segIdx) => {
+                      const ptB = activePoints[segIdx + 1];
+                      const isVertical = isNear(ptA.x, ptB.x, 4);
+                      const midSegX = (ptA.x + ptB.x) / 2;
+                      const midSegY = (ptA.y + ptB.y) / 2;
+
+                      return (
+                        <g
+                          key={`seg_${segIdx}`}
+                          transform={`translate(${midSegX}, ${midSegY})`}
+                          onMouseDown={(e) =>
+                            handleStartDragSegment(
+                              e,
+                              rel.id,
+                              segIdx,
+                              activePoints,
+                              isVertical,
+                              sSide,
+                              tSide
+                            )
+                          }
+                          className={`${
+                            isVertical ? 'cursor-ew-resize' : 'cursor-ns-resize'
+                          } select-none group`}
+                        >
+                          <title>
+                            {isVertical
+                              ? 'Drag vertical segment horizontally (draw.io style)'
+                              : 'Drag horizontal segment vertically (draw.io style)'}
+                          </title>
+                          {/* Segment handle bar */}
+                          {isVertical ? (
+                            <rect
+                              x="-4"
+                              y="-8"
+                              width="8"
+                              height="16"
+                              rx="3"
+                              fill={isDark ? '#0284c7' : '#0284c7'}
+                              stroke="#ffffff"
+                              strokeWidth="1.5"
+                              className="shadow-md hover:scale-125 transition-transform"
+                            />
+                          ) : (
+                            <rect
+                              x="-8"
+                              y="-4"
+                              width="16"
+                              height="8"
+                              rx="3"
+                              fill={isDark ? '#0284c7' : '#0284c7'}
+                              stroke="#ffffff"
+                              strokeWidth="1.5"
+                              className="shadow-md hover:scale-125 transition-transform"
+                            />
+                          )}
+                        </g>
+                      );
+                    })}
+
+                    {/* Waypoint Vertices (Drag to adjust corner position) */}
+                    {activePoints.slice(1, -1).map((pt, wpIdx) => (
+                      <g
+                        key={`wp_${wpIdx}`}
+                        transform={`translate(${pt.x}, ${pt.y})`}
+                        onMouseDown={(e) =>
+                          handleStartDragWaypoint(
+                            e,
+                            rel.id,
+                            wpIdx + 1,
+                            activePoints,
+                            sSide,
+                            tSide
+                          )
+                        }
+                        className="cursor-move select-none"
+                      >
+                        <title>Drag corner waypoint</title>
+                        <circle
+                          r="5.5"
+                          fill="#ffffff"
+                          stroke={isDark ? '#0284c7' : '#0284c7'}
+                          strokeWidth="2"
+                          className="shadow hover:scale-125 transition-transform"
+                        />
+                      </g>
+                    ))}
                   </g>
                 )}
 
@@ -784,11 +1037,9 @@ export const Canvas: React.FC<CanvasProps> = ({
           {/* Interactive drawing line preview (NO ARROW) */}
           {connectingSource && (
             <path
-              d={`M ${connectingSource.startX} ${connectingSource.startY} L ${
-                (connectingSource.startX + mouseCanvasPos.x) / 2
-              } ${connectingSource.startY} L ${
-                (connectingSource.startX + mouseCanvasPos.x) / 2
-              } ${mouseCanvasPos.y} L ${mouseCanvasPos.x} ${mouseCanvasPos.y}`}
+              d={`M ${connectingSource.startX} ${connectingSource.startY} L ${(connectingSource.startX + mouseCanvasPos.x) / 2
+                } ${connectingSource.startY} L ${(connectingSource.startX + mouseCanvasPos.x) / 2
+                } ${mouseCanvasPos.y} L ${mouseCanvasPos.x} ${mouseCanvasPos.y}`}
               fill="none"
               stroke={isDark ? '#38bdf8' : '#0284c7'}
               strokeWidth="2.5"

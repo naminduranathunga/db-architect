@@ -53,6 +53,11 @@ export interface Table {
   notes?: string;
 }
 
+export interface Point {
+  x: number;
+  y: number;
+}
+
 export interface Relation {
   id: string;
   sourceTableId: string;
@@ -62,6 +67,7 @@ export interface Relation {
   cardinality: Cardinality;
   routing?: LineRouting; // 'orthogonal' or 'bezier'
   bendOffset?: number; // horizontal or corridor offset in px
+  waypoints?: Point[]; // custom draw.io-style intermediate waypoints
   name?: string;
   onDelete?: ReferentialAction;
   onUpdate?: ReferentialAction;

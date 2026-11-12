@@ -607,6 +607,25 @@ export const PropertyBar: React.FC<PropertyBarProps> = ({
               </div>
             </div>
 
+            {/* Custom Orthogonal Waypoints Reset */}
+            {(selectedRelation.routing || 'orthogonal') === 'orthogonal' && selectedRelation.waypoints && selectedRelation.waypoints.length > 0 && (
+              <div className={`p-2.5 rounded-lg border flex items-center justify-between ${subBgClass}`}>
+                <div>
+                  <span className="font-semibold block text-[11px]">Custom Waypoints</span>
+                  <span className="text-[10px] text-slate-400">
+                    {selectedRelation.waypoints.length} points active
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateRelation({ waypoints: undefined, bendOffset: 0 })}
+                  className="px-2 py-1 rounded bg-slate-200 dark:bg-slate-800 hover:bg-rose-500/10 hover:text-rose-400 text-[11px] font-semibold transition"
+                >
+                  Reset Path
+                </button>
+              </div>
+            )}
+
             {/* Bend Corridor Distance (draw.io style) */}
             {(selectedRelation.routing || 'orthogonal') === 'orthogonal' && (
               <div>
@@ -624,14 +643,14 @@ export const PropertyBar: React.FC<PropertyBarProps> = ({
                   max="150"
                   step="5"
                   value={selectedRelation.bendOffset || 0}
-                  onChange={(e) => handleUpdateRelation({ bendOffset: parseInt(e.target.value, 10) })}
+                  onChange={(e) => handleUpdateRelation({ bendOffset: parseInt(e.target.value, 10), waypoints: undefined })}
                   className="w-full accent-sky-500 cursor-pointer"
                 />
                 <div className="flex justify-between text-[10px] text-slate-400 mt-0.5">
                   <span>-150px (Left)</span>
                   <button
                     type="button"
-                    onClick={() => handleUpdateRelation({ bendOffset: 0 })}
+                    onClick={() => handleUpdateRelation({ bendOffset: 0, waypoints: undefined })}
                     className="hover:underline text-sky-500"
                   >
                     Reset
