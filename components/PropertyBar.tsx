@@ -39,7 +39,66 @@ export type SelectionTarget =
   | { type: 'column'; tableId: string; columnId: string }
   | { type: 'table'; tableId: string }
   | { type: 'relation'; relationId: string }
+  | { type: 'multiple'; tableIds: string[]; relationIds?: string[] }
   | null;
+
+interface EnumValuesInputProps {
+  initialValues: string[];
+  inputClass: string;
+  onUpdate: (values: string[]) => void;
+}
+
+const EnumValuesInput: React.FC<EnumValuesInputProps> = ({
+  initialValues,
+  inputClass,
+  onUpdate,
+}) => {
+  const [text, setText] = React.useState(() => initialValues.join(', '));
+  const isFocusedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    // Only synchronize from external props if the user is not actively typing in the input
+    if (!isFocusedRef.current) {
+      setText(initialValues.join(', '));
+    }
+  }, [initialValues]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setText(val);
+    const splitVals = val
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean);
+    onUpdate(splitVals);
+  };
+
+  const handleFocus = () => {
+    isFocusedRef.current = true;
+  };
+
+  const handleBlur = () => {
+    isFocusedRef.current = false;
+    const splitVals = text
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean);
+    onUpdate(splitVals);
+    setText(splitVals.join(', '));
+  };
+
+  return (
+    <input
+      type="text"
+      value={text}
+      onFocus={handleFocus}
+      onChange={handleChange}
+      onBlur={handleBlur}
+      placeholder="pending, shipped, delivered"
+      className={`w-full px-2 py-1 rounded border font-mono text-xs ${inputClass}`}
+    />
+  );
+};
 
 interface PropertyBarProps {
   worksheet: Worksheet;
@@ -818,6 +877,106 @@ export const PropertyBar: React.FC<PropertyBarProps> = ({
         </div>
       )}
 
+      {/* 3b. MULTIPLE ELEMENTS SELECTED PROPERTIES */}
+      {selection?.type === 'multiple' && (
+        <div className="flex flex-col h-full">
+          {/* Header */}
+          <div className="px-4 py-3 border-b flex items-center justify-between">
+            <div>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-sky-500">
+                Multiple Selection
+              </span>
+              <h3 className="font-bold text-sm">
+                {selection.tableIds.length} Table{selection.tableIds.length === 1 ? '' : 's'} Selected
+              </h3>
+            </div>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition"
+              title="Close panel"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <div className="p-4 space-y-4 overflow-y-auto grow text-xs">
+            <div className={`p-3 rounded-lg border ${subBgClass}`}>
+              <span className="font-semibold block mb-2 text-slate-300">Selected Tables</span>
+              <div className="space-y-1">
+                {selection.tableIds.map((tblId) => {
+                  const tbl = worksheet.tables.find((t) => t.id === tblId);
+                  return (
+                    <div key={tblId} className="flex items-center justify-between font-mono text-[11px] py-1 border-b border-slate-800 last:border-none">
+                      <span className="font-bold text-sky-400">{tbl?.name || tblId}</span>
+                      <span className="text-slate-400">{tbl?.columns.length || 0} cols</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Batch Table Header Color */}
+            <div>
+              <label className={`block font-semibold uppercase tracking-wider mb-2 ${labelClass}`}>
+                Batch Header Color
+              </label>
+              <div className="grid grid-cols-4 gap-2">
+                {TABLE_COLORS.map((c) => (
+                  <button
+                    key={c.name}
+                    type="button"
+                    onClick={() => {
+                      onUpdateWorksheet((prev) => ({
+                        ...prev,
+                        tables: prev.tables.map((t) =>
+                          selection.tableIds.includes(t.id) ? { ...t, color: c.bg } : t
+                        ),
+                      }));
+                    }}
+                    className="h-7 rounded-lg hover:scale-105 transition-transform flex items-center justify-center"
+                    style={{ backgroundColor: c.bg }}
+                    title={c.name}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div className={`p-3 rounded-xl border space-y-1.5 ${subBgClass}`}>
+              <span className="font-semibold block text-slate-300">Group Actions</span>
+              <p className="text-[11px] text-slate-400">
+                • Drag any selected table to move all {selection.tableIds.length} tables together.<br />
+                • Press <kbd className="px-1 rounded bg-slate-800 text-sky-400 font-mono text-[10px]">Ctrl+D</kbd> to duplicate all selected tables.<br />
+                • Press <kbd className="px-1 rounded bg-slate-800 text-rose-400 font-mono text-[10px]">Del</kbd> to delete all selected tables.
+              </p>
+            </div>
+          </div>
+
+          {/* Footer Actions */}
+          <div className="p-3 border-t flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => {
+                selection.tableIds.forEach((id) => onDeleteTable(id));
+              }}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-rose-500 hover:bg-rose-500/10 text-xs font-semibold transition"
+            >
+              <Trash2 size={13} />
+              <span>Delete {selection.tableIds.length} Tables</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                selection.tableIds.forEach((id) => onDuplicateTable(id));
+              }}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-md border text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+            >
+              <Copy size={13} />
+              <span>Duplicate All</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 4. OVERVIEW (NO SELECTION) */}
       {!selection && (
         <div className="flex flex-col h-full">
@@ -935,18 +1094,10 @@ export const PropertyBar: React.FC<PropertyBarProps> = ({
                           <label className={`block text-[10px] font-semibold mb-0.5 ${labelClass}`}>
                             Allowed Values (comma separated)
                           </label>
-                          <input
-                            type="text"
-                            value={ct.values.join(', ')}
-                            onChange={(e) => {
-                              const vals = e.target.value
-                                .split(',')
-                                .map((v) => v.trim())
-                                .filter(Boolean);
-                              handleUpdateCustomType(ct.id, { values: vals });
-                            }}
-                            placeholder="pending, shipped, delivered"
-                            className={`w-full px-2 py-1 rounded border font-mono text-xs ${inputClass}`}
+                          <EnumValuesInput
+                            initialValues={ct.values}
+                            inputClass={inputClass}
+                            onUpdate={(vals) => handleUpdateCustomType(ct.id, { values: vals })}
                           />
                         </div>
 

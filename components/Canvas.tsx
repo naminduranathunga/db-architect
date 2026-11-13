@@ -76,14 +76,24 @@ export const Canvas: React.FC<CanvasProps> = ({
   const isPanningRef = useRef(false);
   const lastPanPosRef = useRef({ x: 0, y: 0 });
 
-  // Table dragging state
+  // Table dragging state (supports single and multiple selected tables)
   const draggedTableRef = useRef<{
     tableId: string;
-    startX: number;
-    startY: number;
+    isMulti: boolean;
+    startPositions: Map<string, { x: number; y: number }>;
     startMouseX: number;
     startMouseY: number;
   } | null>(null);
+
+  // Selection Box marquee state (for multi-select)
+  const [selectionBox, setSelectionBox] = useState<{
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+  } | null>(null);
+  const isSelectingBoxRef = useRef(false);
+  const selectionBoxStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   // Bend dragging state (legacy corridor slider)
   const draggingBendRef = useRef<{
@@ -210,21 +220,29 @@ export const Canvas: React.FC<CanvasProps> = ({
   // Real-time Window-level mouse listeners
   useEffect(() => {
     const handleWindowMouseMove = (e: MouseEvent) => {
-      // 1. Real-time Table Dragging
+      // 1. Real-time Table Dragging (supports single and group dragging)
       if (draggedTableRef.current) {
-        const { tableId, startX, startY, startMouseX, startMouseY } = draggedTableRef.current;
+        const { isMulti, startPositions, startMouseX, startMouseY } = draggedTableRef.current;
         const currentZoom = zoomRef.current;
         const dx = (e.clientX - startMouseX) / currentZoom;
         const dy = (e.clientY - startMouseY) / currentZoom;
-        const newX = Math.round(startX + dx);
-        const newY = Math.round(startY + dy);
 
         if (rafRef.current) cancelAnimationFrame(rafRef.current);
 
         rafRef.current = requestAnimationFrame(() => {
           onUpdateWorksheet((prev) => ({
             ...prev,
-            tables: prev.tables.map((t) => (t.id === tableId ? { ...t, x: newX, y: newY } : t)),
+            tables: prev.tables.map((t) => {
+              const initPos = startPositions.get(t.id);
+              if (initPos) {
+                return {
+                  ...t,
+                  x: Math.round(initPos.x + dx),
+                  y: Math.round(initPos.y + dy),
+                };
+              }
+              return t;
+            }),
           }));
         });
       }
@@ -341,6 +359,17 @@ export const Canvas: React.FC<CanvasProps> = ({
           connectingSource.mouseMoved = true;
         }
       }
+
+      // 5. Dragging Selection Square
+      if (isSelectingBoxRef.current) {
+        const currentPos = screenToCanvas(e.clientX, e.clientY);
+        setSelectionBox({
+          startX: selectionBoxStartRef.current.x,
+          startY: selectionBoxStartRef.current.y,
+          currentX: currentPos.x,
+          currentY: currentPos.y,
+        });
+      }
     };
 
     const handleWindowMouseUp = (e: MouseEvent) => {
@@ -386,6 +415,53 @@ export const Canvas: React.FC<CanvasProps> = ({
         isPanningRef.current = false;
       }
 
+      // Finish Selection Square
+      if (isSelectingBoxRef.current) {
+        isSelectingBoxRef.current = false;
+        const currentPos = screenToCanvas(e.clientX, e.clientY);
+        const boxX1 = Math.min(selectionBoxStartRef.current.x, currentPos.x);
+        const boxX2 = Math.max(selectionBoxStartRef.current.x, currentPos.x);
+        const boxY1 = Math.min(selectionBoxStartRef.current.y, currentPos.y);
+        const boxY2 = Math.max(selectionBoxStartRef.current.y, currentPos.y);
+
+        setSelectionBox(null);
+
+        // Only select if dragged more than 5px to distinguish from simple click
+        if (boxX2 - boxX1 > 5 || boxY2 - boxY1 > 5) {
+          const currentWs = worksheetRef.current;
+          const enclosedTableIds: string[] = [];
+
+          for (const tbl of currentWs.tables) {
+            const tblW = TABLE_WIDTH;
+            const tblH = HEADER_HEIGHT + tbl.columns.length * ROW_HEIGHT + 16;
+            const tblX1 = tbl.x;
+            const tblX2 = tbl.x + tblW;
+            const tblY1 = tbl.y;
+            const tblY2 = tbl.y + tblH;
+
+            // Box intersection with table bounds
+            const overlaps = !(
+              boxX2 < tblX1 ||
+              boxX1 > tblX2 ||
+              boxY2 < tblY1 ||
+              boxY1 > tblY2
+            );
+
+            if (overlaps) {
+              enclosedTableIds.push(tbl.id);
+            }
+          }
+
+          if (enclosedTableIds.length === 1) {
+            onSelectTarget({ type: 'table', tableId: enclosedTableIds[0] });
+          } else if (enclosedTableIds.length > 1) {
+            onSelectTarget({ type: 'multiple', tableIds: enclosedTableIds });
+          } else {
+            onSelectTarget(null);
+          }
+        }
+      }
+
       // If user was dragging a line and released mouse:
       if (connectingSource && connectingSource.mouseMoved) {
         const elem = document.elementFromPoint(e.clientX, e.clientY);
@@ -428,7 +504,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         return;
       }
 
-      // Delete or Backspace: Priority is COLUMN -> RELATION -> TABLE
+      // Delete or Backspace: Priority is COLUMN -> RELATION -> TABLE -> MULTIPLE
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selection?.type === 'column') {
           e.preventDefault();
@@ -439,6 +515,9 @@ export const Canvas: React.FC<CanvasProps> = ({
         } else if (selection?.type === 'table') {
           e.preventDefault();
           deleteTable(selection.tableId);
+        } else if (selection?.type === 'multiple') {
+          e.preventDefault();
+          deleteMultipleTables(selection.tableIds);
         }
       }
 
@@ -453,7 +532,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selection, worksheet, onSelectTarget]);
 
-  // Canvas Mouse Down: Canvas Panning or Deselect
+  // Canvas Mouse Down: Canvas Panning (Middle Click / Space) or Selection Square (Left Drag)
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
 
@@ -468,9 +547,24 @@ export const Canvas: React.FC<CanvasProps> = ({
       setConnectingSource(null);
     }
 
-    if (e.button === 0 || e.button === 1) {
+    // Middle click or space-drag pans the canvas
+    if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
       isPanningRef.current = true;
       lastPanPosRef.current = { x: e.clientX, y: e.clientY };
+      return;
+    }
+
+    // Left click on background: Start Drawing Selection Square
+    if (e.button === 0) {
+      const canvasPos = screenToCanvas(e.clientX, e.clientY);
+      isSelectingBoxRef.current = true;
+      selectionBoxStartRef.current = canvasPos;
+      setSelectionBox({
+        startX: canvasPos.x,
+        startY: canvasPos.y,
+        currentX: canvasPos.x,
+        currentY: canvasPos.y,
+      });
       onSelectTarget(null);
     }
   };
@@ -495,15 +589,27 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
   };
 
-  // Start dragging a table
+  // Start dragging a table (supports single and group dragging)
   const handleStartDragTable = (e: React.MouseEvent, tableId: string) => {
     const table = worksheet.tables.find((t) => t.id === tableId);
     if (!table) return;
 
+    // Check if dragging part of an existing multi-selection
+    const isPartOfMulti = selection?.type === 'multiple' && selection.tableIds.includes(tableId);
+    const tablesToMove = isPartOfMulti ? selection.tableIds : [tableId];
+
+    const startPositions = new Map<string, { x: number; y: number }>();
+    for (const id of tablesToMove) {
+      const tbl = worksheet.tables.find((t) => t.id === id);
+      if (tbl) {
+        startPositions.set(id, { x: tbl.x, y: tbl.y });
+      }
+    }
+
     draggedTableRef.current = {
       tableId,
-      startX: table.x,
-      startY: table.y,
+      isMulti: isPartOfMulti,
+      startPositions,
       startMouseX: e.clientX,
       startMouseY: e.clientY,
     };
@@ -589,6 +695,59 @@ export const Canvas: React.FC<CanvasProps> = ({
     if (selection?.type === 'table' && selection.tableId === tableId) {
       onSelectTarget(null);
     }
+  };
+
+  const deleteMultipleTables = (tableIds: string[]) => {
+    const nextWs = {
+      ...worksheet,
+      tables: worksheet.tables.filter((t) => !tableIds.includes(t.id)),
+      relations: worksheet.relations.filter(
+        (r) => !tableIds.includes(r.sourceTableId) && !tableIds.includes(r.targetTableId)
+      ),
+    };
+    onSnapshot(nextWs);
+    onUpdateWorksheet(nextWs);
+    onSelectTarget(null);
+  };
+
+  const duplicateMultipleTables = (tableIds: string[]) => {
+    const tablesToDup = worksheet.tables.filter((t) => tableIds.includes(t.id));
+    if (tablesToDup.length === 0) return;
+
+    const idMap = new Map<string, string>();
+    const duplicatedTables: Table[] = [];
+
+    for (const srcTable of tablesToDup) {
+      const newTableId = `tbl_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      idMap.set(srcTable.id, newTableId);
+
+      const clonedColumns = srcTable.columns.map((c) => ({
+        ...c,
+        id: `col_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      }));
+
+      duplicatedTables.push({
+        ...srcTable,
+        id: newTableId,
+        name: `${srcTable.name}_copy`,
+        x: srcTable.x + 40,
+        y: srcTable.y + 40,
+        columns: clonedColumns,
+        indexes: srcTable.indexes.map((idx) => ({
+          ...idx,
+          id: `idx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          name: `${idx.name}_copy`,
+        })),
+      });
+    }
+
+    const nextWs = {
+      ...worksheet,
+      tables: [...worksheet.tables, ...duplicatedTables],
+    };
+    onSnapshot(nextWs);
+    onUpdateWorksheet(nextWs);
+    onSelectTarget({ type: 'multiple', tableIds: duplicatedTables.map((t) => t.id) });
   };
 
   const duplicateTable = (tableId: string) => {
@@ -736,6 +895,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   const selectedRelId = selection?.type === 'relation' ? selection.relationId : null;
   const selectedTableId = selection?.type === 'table' ? selection.tableId : null;
   const selectedColId = selection?.type === 'column' ? selection.columnId : null;
+  const multiSelectedTableIds = selection?.type === 'multiple' ? selection.tableIds : [];
 
   return (
     <div
@@ -758,9 +918,13 @@ export const Canvas: React.FC<CanvasProps> = ({
           pointerEvents: 'none',
         }}
       >
-        {/* SVG Overlay for Relationship Lines */}
+        {/* SVG Overlay for Relationship Lines
+            When a relationship is selected or actively edited, elevate the SVG overlay z-index above table cards (z-20)
+            so overlapping tables and elements never block editing the shape or moving handles */}
         <svg
-          className="absolute inset-0 overflow-visible"
+          className={`absolute inset-0 overflow-visible ${
+            selectedRelId || hoveredRelationId ? 'z-20' : 'z-0'
+          }`}
           style={{ width: '100%', height: '100%', pointerEvents: 'none' }}
         >
           <defs>
@@ -770,8 +934,15 @@ export const Canvas: React.FC<CanvasProps> = ({
             </filter>
           </defs>
 
-          {/* Render Existing Relations (NO ARROWS) */}
-          {worksheet.relations.map((rel) => {
+          {/* Render Existing Relations (NO ARROWS)
+              Selected and hovered relations are sorted to the end so they render on top of overlapping lines */}
+          {[...worksheet.relations]
+            .sort((a, b) => {
+              const aPriority = a.id === selectedRelId ? 2 : a.id === hoveredRelationId ? 1 : 0;
+              const bPriority = b.id === selectedRelId ? 2 : b.id === hoveredRelationId ? 1 : 0;
+              return aPriority - bPriority;
+            })
+            .map((rel) => {
             const isSelf = rel.sourceTableId === rel.targetTableId;
             const sTable = worksheet.tables.find((t) => t.id === rel.sourceTableId);
             const tTable = worksheet.tables.find((t) => t.id === rel.targetTableId);
@@ -1051,32 +1222,56 @@ export const Canvas: React.FC<CanvasProps> = ({
 
         {/* Tables Container */}
         <div style={{ pointerEvents: 'auto' }}>
-          {worksheet.tables.map((table) => (
-            <TableCard
-              key={table.id}
-              table={table}
-              dialect={worksheet.dialect}
-              theme={theme}
-              isSelected={selectedTableId === table.id && selectedColId === null}
-              selectedColumnId={selectedColId}
-              zoom={zoom}
-              onSelect={() => onSelectTarget({ type: 'table', tableId: table.id })}
-              onSelectColumn={(col) =>
-                onSelectTarget({ type: 'column', tableId: table.id, columnId: col.id })
-              }
-              onUpdate={updateTable}
-              onDelete={() => deleteTable(table.id)}
-              onDuplicate={() => duplicateTable(table.id)}
-              onStartConnecting={handleStartConnecting}
-              onEndConnecting={handleEndConnecting}
-              isConnecting={connectingSource !== null}
-              connectingSourceColId={connectingSource?.columnId || null}
-              onDuplicateColumn={(col) => duplicateColumn(table.id, col)}
-              onStartDrag={handleStartDragTable}
-              onColumnReorder={handleColumnReorder}
-            />
-          ))}
+          {worksheet.tables.map((table) => {
+            const isTableSelected =
+              (selectedTableId === table.id && selectedColId === null) ||
+              multiSelectedTableIds.includes(table.id);
+
+            return (
+              <TableCard
+                key={table.id}
+                table={table}
+                dialect={worksheet.dialect}
+                theme={theme}
+                isSelected={isTableSelected}
+                selectedColumnId={selectedColId}
+                zoom={zoom}
+                onSelect={() => onSelectTarget({ type: 'table', tableId: table.id })}
+                onSelectColumn={(col) =>
+                  onSelectTarget({ type: 'column', tableId: table.id, columnId: col.id })
+                }
+                onUpdate={updateTable}
+                onDelete={() => deleteTable(table.id)}
+                onDuplicate={() => duplicateTable(table.id)}
+                onStartConnecting={handleStartConnecting}
+                onEndConnecting={handleEndConnecting}
+                isConnecting={connectingSource !== null}
+                connectingSourceColId={connectingSource?.columnId || null}
+                onDuplicateColumn={(col) => duplicateColumn(table.id, col)}
+                onStartDrag={handleStartDragTable}
+                onColumnReorder={handleColumnReorder}
+              />
+            );
+          })}
         </div>
+
+        {/* Selection Square (Marquee) Visual Overlay */}
+        {selectionBox && (
+          <div
+            style={{
+              position: 'absolute',
+              left: Math.min(selectionBox.startX, selectionBox.currentX),
+              top: Math.min(selectionBox.startY, selectionBox.currentY),
+              width: Math.abs(selectionBox.currentX - selectionBox.startX),
+              height: Math.abs(selectionBox.currentY - selectionBox.startY),
+              backgroundColor: isDark ? 'rgba(56, 189, 248, 0.15)' : 'rgba(37, 99, 235, 0.12)',
+              border: `1.5px dashed ${isDark ? '#38bdf8' : '#2563eb'}`,
+              borderRadius: '4px',
+              pointerEvents: 'none',
+              zIndex: 30,
+            }}
+          />
+        )}
       </div>
     </div>
   );

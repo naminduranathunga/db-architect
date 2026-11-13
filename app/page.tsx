@@ -247,6 +247,60 @@ export default function Home() {
     setSelection(null);
   }, [pushSnapshot]);
 
+  const handleDeleteMultipleTables = useCallback((tableIds: string[]) => {
+    setWorksheet((prev) => {
+      if (!prev) return prev;
+      const nextWs = {
+        ...prev,
+        tables: prev.tables.filter((t) => !tableIds.includes(t.id)),
+        relations: prev.relations.filter(
+          (r) => !tableIds.includes(r.sourceTableId) && !tableIds.includes(r.targetTableId)
+        ),
+      };
+      pushSnapshot(nextWs);
+      return nextWs;
+    });
+    setSelection(null);
+  }, [pushSnapshot]);
+
+  const handleDuplicateMultipleTables = useCallback((tableIds: string[]) => {
+    setWorksheet((prev) => {
+      if (!prev) return prev;
+      const tablesToDup = prev.tables.filter((t) => tableIds.includes(t.id));
+      if (tablesToDup.length === 0) return prev;
+
+      const newTableIds: string[] = [];
+      const clonedTables: Table[] = tablesToDup.map((srcTable) => {
+        const newTableId = `tbl_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        newTableIds.push(newTableId);
+        return {
+          ...srcTable,
+          id: newTableId,
+          name: `${srcTable.name}_copy`,
+          x: srcTable.x + 40,
+          y: srcTable.y + 40,
+          columns: srcTable.columns.map((c) => ({
+            ...c,
+            id: `col_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          })),
+          indexes: srcTable.indexes.map((idx) => ({
+            ...idx,
+            id: `idx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            name: `${idx.name}_copy`,
+          })),
+        };
+      });
+
+      const nextWs = {
+        ...prev,
+        tables: [...prev.tables, ...clonedTables],
+      };
+      pushSnapshot(nextWs);
+      setSelection({ type: 'multiple', tableIds: newTableIds });
+      return nextWs;
+    });
+  }, [pushSnapshot]);
+
   const handleDuplicateTable = useCallback((tableId: string) => {
     setWorksheet((prev) => {
       if (!prev) return prev;
@@ -420,6 +474,8 @@ export default function Home() {
           }
         } else if (selection?.type === 'table') {
           handleDuplicateTable(selection.tableId);
+        } else if (selection?.type === 'multiple') {
+          handleDuplicateMultipleTables(selection.tableIds);
         }
         return;
       }
@@ -560,6 +616,10 @@ export default function Home() {
           e.preventDefault();
           e.stopPropagation();
           handleDeleteTable(selection.tableId);
+        } else if (selection?.type === 'multiple') {
+          e.preventDefault();
+          e.stopPropagation();
+          handleDeleteMultipleTables(selection.tableIds);
         }
       }
     };
@@ -574,9 +634,11 @@ export default function Home() {
     handleRedo,
     handleDuplicateColumn,
     handleDuplicateTable,
+    handleDuplicateMultipleTables,
     handleDeleteColumn,
     handleDeleteRelation,
     handleDeleteTable,
+    handleDeleteMultipleTables,
     pushSnapshot,
   ]);
 
