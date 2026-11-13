@@ -20,6 +20,7 @@ import {
   PanelRightOpen,
   Undo2,
   Redo2,
+  FileUp,
 } from 'lucide-react';
 
 interface ToolbarProps {
@@ -34,6 +35,7 @@ interface ToolbarProps {
   onManualSave: () => void;
   onOpenWorksheetsModal: () => void;
   onOpenExportModal: () => void;
+  onOpenFileImport?: () => void;
   isSaving: boolean;
   lastSavedAt: number | null;
   zoom: number;
@@ -59,6 +61,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onManualSave,
   onOpenWorksheetsModal,
   onOpenExportModal,
+  onOpenFileImport,
   isSaving,
   lastSavedAt,
   zoom,
@@ -129,9 +132,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                     setIsEditingTitle(false);
                   }
                 }}
-                className={`px-2 py-0.5 rounded text-sm font-semibold focus:outline-none border ${
-                  isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
-                }`}
+                className={`px-2 py-0.5 rounded text-sm font-semibold focus:outline-none border ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                  }`}
               />
               <button
                 type="button"
@@ -144,9 +146,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           ) : (
             <button
               onClick={() => setIsEditingTitle(true)}
-              className={`flex items-center gap-1.5 px-2 py-1 rounded-md group transition text-left ${
-                isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
-              }`}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded-md group transition text-left ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
+                }`}
               title="Click to rename diagram"
             >
               <span className="font-semibold text-sm truncate max-w-[150px] sm:max-w-[200px]">
@@ -161,10 +162,24 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             type="button"
             onClick={onOpenWorksheetsModal}
             className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border transition ${btnBgClass}`}
+            title="Open saved diagrams or import a file"
           >
             <FolderOpen size={13} />
             <span className="hidden md:inline">Diagrams</span>
           </button>
+
+          {/* Open portable file shortcut */}
+          {onOpenFileImport && (
+            <button
+              type="button"
+              onClick={onOpenFileImport}
+              className={`hidden lg:flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border transition ${btnBgClass}`}
+              title="Open a portable .sqldiagram file from your computer"
+            >
+              <FileUp size={13} className="text-sky-400" />
+              <span>Open File</span>
+            </button>
+          )}
         </div>
 
         {/* Undo and Redo buttons */}
@@ -191,29 +206,26 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
         {/* Dialect Toggle */}
         <div
-          className={`hidden sm:flex items-center p-0.5 rounded-lg border ${
-            isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-100 border-slate-200'
-          }`}
+          className={`hidden sm:flex items-center p-0.5 rounded-lg border ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-100 border-slate-200'
+            }`}
         >
           <button
             type="button"
             onClick={() => onDialectChange('pgsql')}
-            className={`px-2.5 py-1 text-xs font-mono font-medium rounded-md transition ${
-              worksheet.dialect === 'pgsql'
+            className={`px-2.5 py-1 text-xs font-mono font-medium rounded-md transition ${worksheet.dialect === 'pgsql'
                 ? 'bg-sky-600 text-white shadow-xs'
                 : 'opacity-70 hover:opacity-100'
-            }`}
+              }`}
           >
             PostgreSQL
           </button>
           <button
             type="button"
             onClick={() => onDialectChange('mysql')}
-            className={`px-2.5 py-1 text-xs font-mono font-medium rounded-md transition ${
-              worksheet.dialect === 'mysql'
+            className={`px-2.5 py-1 text-xs font-mono font-medium rounded-md transition ${worksheet.dialect === 'mysql'
                 ? 'bg-sky-600 text-white shadow-xs'
                 : 'opacity-70 hover:opacity-100'
-            }`}
+              }`}
           >
             MySQL
           </button>
@@ -251,7 +263,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <button
           type="button"
           onClick={onManualSave}
-          title="Save diagram to IndexedDB (Ctrl+S)"
+          title="Save diagram (Ctrl+S)"
           className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition ${btnBgClass}`}
         >
           <Save size={13} />
@@ -272,9 +284,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
         {/* Zoom Controls */}
         <div
-          className={`hidden sm:flex items-center p-0.5 rounded-lg border ${
-            isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-100 border-slate-200'
-          }`}
+          className={`hidden sm:flex items-center p-0.5 rounded-lg border ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-100 border-slate-200'
+            }`}
         >
           <button
             type="button"
@@ -324,9 +335,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <button
           type="button"
           onClick={onTogglePropertyBar}
-          className={`p-1.5 rounded-lg border transition ${
-            showPropertyBar ? 'bg-sky-600 text-white border-sky-600' : btnBgClass
-          }`}
+          className={`p-1.5 rounded-lg border transition ${showPropertyBar ? 'bg-sky-600 text-white border-sky-600' : btnBgClass
+            }`}
           title="Toggle Property Bar"
         >
           {showPropertyBar ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
@@ -347,9 +357,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             <div onClick={() => setShowHelp(false)} className="fixed inset-0 z-40">
               <div
                 onClick={(e) => e.stopPropagation()}
-                className={`absolute right-4 top-14 w-80 rounded-xl p-4 shadow-2xl text-xs space-y-3 z-50 animate-in fade-in zoom-in-95 duration-100 border ${
-                  isDark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-700'
-                }`}
+                className={`absolute right-4 top-14 w-80 rounded-xl p-4 shadow-2xl text-xs space-y-3 z-50 animate-in fade-in zoom-in-95 duration-100 border ${isDark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-700'
+                  }`}
               >
                 <div className="flex items-center justify-between pb-2 border-b">
                   <span className="font-semibold">Visual DB Diagrammer</span>
@@ -386,10 +395,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                     <span className="opacity-75">Save Diagram:</span>
                     <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-mono text-sky-400">Ctrl + S</kbd>
                   </div>
-                </div>
-
-                <div className="pt-2 border-t text-[11px] opacity-60">
-                  Data stored locally in browser IndexedDB.
                 </div>
               </div>
             </div>

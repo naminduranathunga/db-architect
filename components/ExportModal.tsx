@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Worksheet } from '../types/database';
-import { exportToSvg, exportToMarkdown, exportToMermaid, generateSQL, downloadFile } from '../lib/exporters';
-import { X, Copy, Download, Check, FileCode, FileText, Image, Database } from 'lucide-react';
+import { exportToSvg, exportToMarkdown, exportToMermaid, generateSQL, downloadFile, exportToPortableJSON } from '../lib/exporters';
+import { PORTABLE_FILE_EXTENSION } from '../lib/portableFile';
+import { X, Copy, Download, Check, FileCode, FileText, Image, Database, HardDriveDownload } from 'lucide-react';
 
 interface ExportModalProps {
   worksheet: Worksheet;
@@ -9,16 +10,19 @@ interface ExportModalProps {
 }
 
 export const ExportModal: React.FC<ExportModalProps> = ({ worksheet, onClose }) => {
-  const [activeTab, setActiveTab] = useState<'svg' | 'markdown' | 'mermaid' | 'sql'>('svg');
+  const [activeTab, setActiveTab] = useState<'portable' | 'svg' | 'markdown' | 'mermaid' | 'sql'>('portable');
   const [copied, setCopied] = useState(false);
 
+  const portableContent = React.useMemo(() => exportToPortableJSON(worksheet), [worksheet]);
   const svgContent = React.useMemo(() => exportToSvg(worksheet), [worksheet]);
   const markdownContent = React.useMemo(() => exportToMarkdown(worksheet), [worksheet]);
   const mermaidContent = React.useMemo(() => exportToMermaid(worksheet), [worksheet]);
   const sqlContent = React.useMemo(() => generateSQL(worksheet), [worksheet]);
 
   const currentContent =
-    activeTab === 'svg'
+    activeTab === 'portable'
+      ? portableContent
+      : activeTab === 'svg'
       ? svgContent
       : activeTab === 'markdown'
       ? markdownContent
@@ -38,7 +42,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({ worksheet, onClose }) 
 
   const handleDownload = () => {
     const baseName = worksheet.name || 'schema';
-    if (activeTab === 'svg') {
+    if (activeTab === 'portable') {
+      downloadFile(`${baseName}${PORTABLE_FILE_EXTENSION}`, portableContent, 'application/json');
+    } else if (activeTab === 'svg') {
       downloadFile(`${baseName}.svg`, svgContent, 'image/svg+xml');
     } else if (activeTab === 'markdown') {
       downloadFile(`${baseName}_schema.md`, markdownContent, 'text/markdown');
@@ -55,9 +61,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({ worksheet, onClose }) 
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/90 shrink-0">
           <div>
-            <h3 className="font-semibold text-lg text-white">Export Schema & Diagram</h3>
+            <h3 className="font-semibold text-lg text-white">Export & Download Schema</h3>
             <p className="text-xs text-slate-400">
-              Export diagram as SVG, Markdown documentation, Mermaid ER syntax, or SQL DDL
+              Download portable file to open on any browser/computer, or export to SVG, Markdown, Mermaid, and SQL
             </p>
           </div>
           <button
@@ -71,6 +77,17 @@ export const ExportModal: React.FC<ExportModalProps> = ({ worksheet, onClose }) 
         {/* Tab Header */}
         <div className="flex items-center justify-between px-6 border-b border-slate-800 bg-slate-950/40 shrink-0">
           <div className="flex gap-4">
+            <button
+              onClick={() => setActiveTab('portable')}
+              className={`flex items-center gap-2 py-3 text-sm font-medium border-b-2 transition ${
+                activeTab === 'portable'
+                  ? 'border-sky-500 text-sky-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <HardDriveDownload size={16} />
+              Portable Diagram File
+            </button>
             <button
               onClick={() => setActiveTab('svg')}
               className={`flex items-center gap-2 py-3 text-sm font-medium border-b-2 transition ${
@@ -91,7 +108,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ worksheet, onClose }) 
               }`}
             >
               <FileText size={16} />
-              Markdown Schema
+              Markdown
             </button>
             <button
               onClick={() => setActiveTab('mermaid')}
@@ -102,7 +119,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ worksheet, onClose }) 
               }`}
             >
               <FileCode size={16} />
-              Mermaid Diagram
+              Mermaid
             </button>
             <button
               onClick={() => setActiveTab('sql')}
@@ -113,7 +130,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ worksheet, onClose }) 
               }`}
             >
               <Database size={16} />
-              SQL DDL ({worksheet.dialect.toUpperCase()})
+              SQL DDL
             </button>
           </div>
 
@@ -139,7 +156,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({ worksheet, onClose }) 
 
         {/* Content Viewer */}
         <div className="p-6 overflow-y-auto grow bg-slate-950 font-mono text-xs">
-          {activeTab === 'svg' ? (
+          {activeTab === 'portable' ? (
+            <div className="space-y-4">
+              <div className="p-4 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-200 text-xs leading-relaxed">
+                📦 <strong>Portable Diagram File (<code>.sqldiagram</code>):</strong> This file contains your complete schema, table coordinates, custom 90° orthogonal waypoints, notes, constraints, and PostgreSQL ENUMs. You can download it locally and open it anytime on another computer or browser using the <strong>Open File</strong> button.
+              </div>
+              <pre className="p-4 rounded-lg bg-slate-900/80 border border-slate-800/80 text-slate-300 leading-relaxed overflow-x-auto whitespace-pre-wrap selection:bg-sky-500/30 max-h-[350px]">
+                {portableContent}
+              </pre>
+            </div>
+          ) : activeTab === 'svg' ? (
             <div className="space-y-4">
               <div className="border border-slate-800 rounded-lg p-4 bg-slate-900/40 overflow-auto max-h-[450px] flex items-center justify-center">
                 <div
@@ -161,7 +187,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({ worksheet, onClose }) 
         {/* Footer */}
         <div className="flex items-center justify-between px-6 py-3.5 bg-slate-900 border-t border-slate-800 shrink-0 text-xs text-slate-400">
           <span>
-            {activeTab === 'svg'
+            {activeTab === 'portable'
+              ? `Portable .sqldiagram backup file (${worksheet.tables.length} tables, ${worksheet.relations.length} relations)`
+              : activeTab === 'svg'
               ? `${worksheet.tables.length} tables, ${worksheet.relations.length} relations mapped`
               : activeTab === 'markdown'
               ? 'Complete DDL + Tables documentation + Notes'
@@ -180,4 +208,5 @@ export const ExportModal: React.FC<ExportModalProps> = ({ worksheet, onClose }) 
     </div>
   );
 };
+
 

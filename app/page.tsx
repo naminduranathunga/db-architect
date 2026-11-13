@@ -24,6 +24,7 @@ import { Toolbar } from '../components/Toolbar';
 import { PropertyBar, SelectionTarget } from '../components/PropertyBar';
 import { WorksheetsModal } from '../components/WorksheetsModal';
 import { ExportModal } from '../components/ExportModal';
+import { parsePortableFile } from '../lib/portableFile';
 
 export default function Home() {
   const [worksheet, setWorksheet] = useState<Worksheet | null>(null);
@@ -58,6 +59,7 @@ export default function Home() {
   // Modals for Worksheets and Export
   const [showWorksheetsModal, setShowWorksheetsModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
+  const globalFileInputRef = useRef<HTMLInputElement>(null);
 
   // Debounced auto-save ref
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -783,6 +785,42 @@ export default function Home() {
     }
   };
 
+  const handleImportWorksheet = async (importedWs: Worksheet) => {
+    try {
+      await saveWorksheet(importedWs);
+      const list = await listWorksheets();
+      setWorksheetsList(list);
+      setWorksheet(importedWs);
+      setHistory([importedWs]);
+      setHistoryIndex(0);
+      setZoom(importedWs.zoom || 1);
+      setPan({ x: importedWs.panX ?? 40, y: importedWs.panY ?? 40 });
+      setSelection(null);
+    } catch (err) {
+      console.error('Error importing portable worksheet:', err);
+    }
+  };
+
+  const handleGlobalFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const text = event.target?.result as string;
+        const imported = parsePortableFile(text);
+        await handleImportWorksheet(imported);
+      } catch (err: unknown) {
+        alert(err instanceof Error ? err.message : 'Failed to import diagram file.');
+      }
+    };
+    reader.readAsText(file);
+    if (globalFileInputRef.current) {
+      globalFileInputRef.current.value = '';
+    }
+  };
+
   // Zoom controls
   const handleZoomIn = () => setZoom((z) => Math.min(+(z + 0.15).toFixed(2), 2.5));
   const handleZoomOut = () => setZoom((z) => Math.max(+(z - 0.15).toFixed(2), 0.3));
@@ -848,6 +886,15 @@ export default function Home() {
         isDark ? 'bg-[#0b1120] text-slate-100' : 'bg-slate-50 text-slate-800'
       }`}
     >
+      {/* Hidden file input for portable file import */}
+      <input
+        type="file"
+        ref={globalFileInputRef}
+        onChange={handleGlobalFileSelected}
+        accept=".sqldiagram,.json"
+        className="hidden"
+      />
+
       {/* Top Toolbar */}
       <Toolbar
         worksheet={worksheet}
@@ -861,6 +908,7 @@ export default function Home() {
         onManualSave={handleManualSave}
         onOpenWorksheetsModal={() => setShowWorksheetsModal(true)}
         onOpenExportModal={() => setShowExportModal(true)}
+        onOpenFileImport={() => globalFileInputRef.current?.click()}
         isSaving={isSaving}
         lastSavedAt={lastSavedAt}
         zoom={zoom}
@@ -919,6 +967,7 @@ export default function Home() {
           onDelete={handleDeleteWorksheet}
           onDuplicate={handleDuplicateWorksheet}
           onRename={handleRenameSavedWorksheet}
+          onImportWorksheet={handleImportWorksheet}
         />
       )}
 

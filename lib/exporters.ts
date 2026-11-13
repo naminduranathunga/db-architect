@@ -1,5 +1,8 @@
 import { Worksheet, Table, Relation, SqlDialect, TABLE_COLORS, Point } from '../types/database';
 import { generateDefaultOrthogonalPoints, pointsToSvgPath } from './orthogonalRouter';
+import { exportToPortableJSON } from './portableFile';
+
+export { exportToPortableJSON };
 
 export function generateSQL(worksheet: Worksheet): string {
   const { dialect, tables, relations } = worksheet;
