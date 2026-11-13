@@ -16,6 +16,20 @@ export function generateSQL(worksheet: Worksheet): string {
   if (isPg) {
     lines.push(`-- Enable UUID extension if needed`);
     lines.push(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";\n`);
+
+    // Define PostgreSQL ENUMs / Custom Types
+    if (worksheet.customTypes && worksheet.customTypes.length > 0) {
+      lines.push(`-- --------------------------------------------------------`);
+      lines.push(`-- Custom Types and Enums`);
+      lines.push(`-- --------------------------------------------------------`);
+      for (const ct of worksheet.customTypes) {
+        if (ct.kind === 'ENUM') {
+          const formattedVals = ct.values.map((v) => `'${v.replace(/'/g, "''")}'`).join(', ');
+          lines.push(`CREATE TYPE ${q}${ct.name}${q} AS ENUM (${formattedVals});`);
+        }
+      }
+      lines.push('');
+    }
   }
 
   // Create tables
@@ -136,7 +150,20 @@ export function exportToMarkdown(worksheet: Worksheet): string {
   md.push(`- **Dialect:** ${isPg ? 'PostgreSQL' : 'MySQL'}`);
   md.push(`- **Tables:** ${tables.length}`);
   md.push(`- **Relationships:** ${relations.length}`);
+  if (isPg && worksheet.customTypes && worksheet.customTypes.length > 0) {
+    md.push(`- **Custom Types / Enums:** ${worksheet.customTypes.length}`);
+  }
   md.push(`- **Generated At:** ${new Date().toLocaleString()}\n`);
+
+  if (isPg && worksheet.customTypes && worksheet.customTypes.length > 0) {
+    md.push(`## Custom Types & ENUMs\n`);
+    md.push(`| Type Name | Kind | Allowed Values |`);
+    md.push(`| :--- | :--- | :--- |`);
+    for (const ct of worksheet.customTypes) {
+      md.push(`| \`${ct.name}\` | **${ct.kind}** | \`${ct.values.join('`, `')}\` |`);
+    }
+    md.push('');
+  }
 
   md.push(`## Tables Summary\n`);
   for (const table of tables) {

@@ -8,6 +8,7 @@ import {
   ReferentialAction,
   IndexType,
   TableIndex,
+  CustomType,
   TABLE_COLORS,
   RELATION_COLORS,
   MYSQL_DATA_TYPES,
@@ -30,6 +31,8 @@ import {
   Sliders,
   Database,
   ArrowRight,
+  ListFilter,
+  Check,
 } from 'lucide-react';
 
 export type SelectionTarget =
@@ -64,7 +67,10 @@ export const PropertyBar: React.FC<PropertyBarProps> = ({
   onDeleteRelation,
 }) => {
   const isDark = theme === 'dark';
-  const typeSuggestions = worksheet.dialect === 'pgsql' ? PGSQL_DATA_TYPES : MYSQL_DATA_TYPES;
+  // Combine built-in data types with custom defined types (e.g. pgsql ENUMs)
+  const customTypeNames = worksheet.customTypes?.map((ct) => ct.name) || [];
+  const baseTypeSuggestions = worksheet.dialect === 'pgsql' ? PGSQL_DATA_TYPES : MYSQL_DATA_TYPES;
+  const typeSuggestions = [...customTypeNames, ...baseTypeSuggestions];
 
   // Selected item references
   let selectedTable: Table | null = null;
@@ -79,6 +85,38 @@ export const PropertyBar: React.FC<PropertyBarProps> = ({
   } else if (selection?.type === 'relation') {
     selectedRelation = worksheet.relations.find((r) => r.id === selection.relationId) || null;
   }
+
+  // Custom Type Operations (for pgsql ENUMs)
+  const handleAddCustomType = () => {
+    const existing = worksheet.customTypes || [];
+    const newTypeName = `custom_type_${existing.length + 1}`;
+    const newType: CustomType = {
+      id: `type_${Date.now()}`,
+      name: newTypeName,
+      kind: 'ENUM',
+      values: ['value1', 'value2', 'value3'],
+    };
+    onUpdateWorksheet((prev) => ({
+      ...prev,
+      customTypes: [...(prev.customTypes || []), newType],
+    }));
+  };
+
+  const handleUpdateCustomType = (typeId: string, updates: Partial<CustomType>) => {
+    onUpdateWorksheet((prev) => ({
+      ...prev,
+      customTypes: (prev.customTypes || []).map((ct) =>
+        ct.id === typeId ? { ...ct, ...updates } : ct
+      ),
+    }));
+  };
+
+  const handleDeleteCustomType = (typeId: string) => {
+    onUpdateWorksheet((prev) => ({
+      ...prev,
+      customTypes: (prev.customTypes || []).filter((ct) => ct.id !== typeId),
+    }));
+  };
 
   // Update Column
   const handleUpdateColumn = (updates: Partial<Column>) => {
@@ -201,9 +239,11 @@ export const PropertyBar: React.FC<PropertyBarProps> = ({
 
             {/* Data Type */}
             <div>
-              <label className={`block font-semibold uppercase tracking-wider mb-1 ${labelClass}`}>
-                Data Type ({worksheet.dialect.toUpperCase()})
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className={`block font-semibold uppercase tracking-wider ${labelClass}`}>
+                  Data Type ({worksheet.dialect.toUpperCase()})
+                </label>
+              </div>
               <input
                 type="text"
                 list="sidebar-data-types"
@@ -216,6 +256,26 @@ export const PropertyBar: React.FC<PropertyBarProps> = ({
                   <option key={t} value={t} />
                 ))}
               </datalist>
+
+              {/* Quick Type Pills */}
+              <div className="flex flex-wrap gap-1 mt-2">
+                {(worksheet.dialect === 'pgsql'
+                  ? ['INTEGER', 'BIGSERIAL', 'VARCHAR(255)', 'DECIMAL', 'NUMERIC(10,2)', 'BOOLEAN', 'TIMESTAMPTZ', ...customTypeNames]
+                  : ['INT', 'BIGINT', 'VARCHAR(255)', 'DECIMAL', 'DECIMAL(10,2)', 'BOOLEAN', 'DATETIME']
+                ).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => handleUpdateColumn({ type: t })}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition ${selectedColumn.type.toUpperCase() === t.toUpperCase()
+                      ? 'bg-sky-500/20 border-sky-500 text-sky-400 font-bold'
+                      : 'border-slate-300 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-sky-400'
+                      }`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Constraints */}
@@ -495,8 +555,8 @@ export const PropertyBar: React.FC<PropertyBarProps> = ({
                                 handleUpdateIndex(idx.id, { columns: newCols.length > 0 ? newCols : [c.name] });
                               }}
                               className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition ${active
-                                  ? 'bg-sky-500/20 border-sky-500 text-sky-400 font-bold'
-                                  : 'border-slate-700 text-slate-400'
+                                ? 'bg-sky-500/20 border-sky-500 text-sky-400 font-bold'
+                                : 'border-slate-700 text-slate-400'
                                 }`}
                             >
                               {c.name}
@@ -584,8 +644,8 @@ export const PropertyBar: React.FC<PropertyBarProps> = ({
                   type="button"
                   onClick={() => handleUpdateRelation({ routing: 'orthogonal' })}
                   className={`flex flex-col items-center justify-center p-2.5 rounded-lg border text-xs font-semibold transition ${(selectedRelation.routing || 'orthogonal') === 'orthogonal'
-                      ? 'border-sky-500 bg-sky-500/10 text-sky-400 ring-1 ring-sky-500'
-                      : 'border-slate-300 dark:border-slate-800 opacity-70 hover:opacity-100'
+                    ? 'border-sky-500 bg-sky-500/10 text-sky-400 ring-1 ring-sky-500'
+                    : 'border-slate-300 dark:border-slate-800 opacity-70 hover:opacity-100'
                     }`}
                 >
                   <GitBranch size={16} className="mb-1" />
@@ -596,8 +656,8 @@ export const PropertyBar: React.FC<PropertyBarProps> = ({
                   type="button"
                   onClick={() => handleUpdateRelation({ routing: 'bezier' })}
                   className={`flex flex-col items-center justify-center p-2.5 rounded-lg border text-xs font-semibold transition ${selectedRelation.routing === 'bezier'
-                      ? 'border-sky-500 bg-sky-500/10 text-sky-400 ring-1 ring-sky-500'
-                      : 'border-slate-300 dark:border-slate-800 opacity-70 hover:opacity-100'
+                    ? 'border-sky-500 bg-sky-500/10 text-sky-400 ring-1 ring-sky-500'
+                    : 'border-slate-300 dark:border-slate-800 opacity-70 hover:opacity-100'
                     }`}
                 >
                   <Sliders size={16} className="mb-1" />
@@ -678,8 +738,8 @@ export const PropertyBar: React.FC<PropertyBarProps> = ({
                     type="button"
                     onClick={() => handleUpdateRelation({ cardinality: c.value as Cardinality })}
                     className={`py-2 rounded-lg border text-center font-mono font-bold text-xs transition ${selectedRelation.cardinality === c.value
-                        ? 'border-sky-500 bg-sky-500/10 text-sky-400 ring-1 ring-sky-500'
-                        : 'border-slate-300 dark:border-slate-800 opacity-70 hover:opacity-100'
+                      ? 'border-sky-500 bg-sky-500/10 text-sky-400 ring-1 ring-sky-500'
+                      : 'border-slate-300 dark:border-slate-800 opacity-70 hover:opacity-100'
                       }`}
                   >
                     {c.label}
@@ -700,8 +760,8 @@ export const PropertyBar: React.FC<PropertyBarProps> = ({
                     type="button"
                     onClick={() => handleUpdateRelation({ color: c })}
                     className={`w-6 h-6 rounded-full transition-transform ${(selectedRelation.color || '#2563eb') === c
-                        ? 'scale-125 ring-2 ring-white ring-offset-2 ring-offset-slate-900'
-                        : 'hover:scale-110 opacity-70 hover:opacity-100'
+                      ? 'scale-125 ring-2 ring-white ring-offset-2 ring-offset-slate-900'
+                      : 'hover:scale-110 opacity-70 hover:opacity-100'
                       }`}
                     style={{ backgroundColor: c }}
                   />
@@ -780,32 +840,129 @@ export const PropertyBar: React.FC<PropertyBarProps> = ({
                 <Database size={15} className="text-sky-500" />
                 <span>{worksheet.name}</span>
               </div>
-              <div className="space-y-1 text-slate-400 text-[11px]">
+              <div className="space-y-1 text-slate-600 text-[11px]">
                 <div className="flex justify-between">
                   <span>Engine:</span>
-                  <span className="font-mono text-slate-200 uppercase">{worksheet.dialect}</span>
+                  <span className="font-mono text-slate-600 uppercase">{worksheet.dialect}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Tables:</span>
-                  <span className="font-mono text-slate-200">{worksheet.tables.length}</span>
+                  <span className="font-mono text-slate-600">{worksheet.tables.length}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Relationships:</span>
-                  <span className="font-mono text-slate-200">{worksheet.relations.length}</span>
+                  <span className="font-mono text-slate-600">{worksheet.relations.length}</span>
                 </div>
+                {worksheet.dialect === 'pgsql' && (
+                  <div className="flex justify-between">
+                    <span>Custom ENUMs:</span>
+                    <span className="font-mono text-sky-600 font-semibold">{worksheet.customTypes?.length || 0}</span>
+                  </div>
+                )}
               </div>
             </div>
 
-            <div className={`p-3 rounded-xl border space-y-2 ${subBgClass}`}>
-              <span className="font-semibold block text-slate-300">Quick Tips</span>
-              <ul className="space-y-1.5 text-[11px] text-slate-400 list-disc list-inside">
-                <li>Click any column row to edit properties in this sidebar.</li>
-                <li>Drag from a column port to another column to relate them.</li>
-                <li>Relations use 90° bends with customizable distance handles.</li>
-                <li>Press <kbd className="px-1 py-0.5 rounded bg-slate-800 text-sky-400 font-mono text-[10px]">Ctrl+D</kbd> to duplicate selected table/column.</li>
-                <li>Press <kbd className="px-1 py-0.5 rounded bg-slate-800 text-sky-400 font-mono text-[10px]">Ctrl+S</kbd> to save immediately.</li>
-              </ul>
-            </div>
+            {/* PostgreSQL Custom Data Types & ENUMs Section */}
+            {worksheet.dialect === 'pgsql' && (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <ListFilter size={14} className="text-sky-500" />
+                    <label className={`font-semibold uppercase tracking-wider ${labelClass}`}>
+                      ENUMs & Types ({worksheet.customTypes?.length || 0})
+                    </label>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddCustomType}
+                    className="flex items-center gap-1 text-[11px] text-sky-500 hover:underline font-semibold"
+                  >
+                    <Plus size={12} />
+                    New Type
+                  </button>
+                </div>
+
+                {!worksheet.customTypes || worksheet.customTypes.length === 0 ? (
+                  <div className={`p-3 rounded-lg border text-center text-slate-400 text-[11px] ${subBgClass}`}>
+                    <p className="mb-1">No custom types defined yet.</p>
+                    <p className="text-[10px] text-slate-500">
+                      e.g. <code>CREATE TYPE order_status AS ENUM (...)</code>
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleAddCustomType}
+                      className="mt-2 px-2.5 py-1 rounded bg-sky-500/10 text-sky-400 hover:bg-sky-500/20 font-medium transition"
+                    >
+                      + Create First ENUM
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {worksheet.customTypes.map((ct) => (
+                      <div key={ct.id} className={`p-3 rounded-lg border space-y-2 ${subBgClass}`}>
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span className="text-[10px] font-bold text-sky-400 uppercase tracking-wider">
+                            ENUM
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCustomType(ct.id)}
+                            className="p-1 text-rose-400 hover:text-rose-500 transition"
+                            title="Delete this custom type"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+
+                        <div>
+                          <label className={`block text-[10px] font-semibold mb-0.5 ${labelClass}`}>
+                            Type Name
+                          </label>
+                          <input
+                            type="text"
+                            value={ct.name}
+                            onChange={(e) =>
+                              handleUpdateCustomType(ct.id, {
+                                name: e.target.value.toLowerCase().replace(/\s+/g, '_'),
+                              })
+                            }
+                            placeholder="e.g. order_status"
+                            className={`w-full px-2 py-1 rounded border font-mono text-xs ${inputClass}`}
+                          />
+                        </div>
+
+                        <div>
+                          <label className={`block text-[10px] font-semibold mb-0.5 ${labelClass}`}>
+                            Allowed Values (comma separated)
+                          </label>
+                          <input
+                            type="text"
+                            value={ct.values.join(', ')}
+                            onChange={(e) => {
+                              const vals = e.target.value
+                                .split(',')
+                                .map((v) => v.trim())
+                                .filter(Boolean);
+                              handleUpdateCustomType(ct.id, { values: vals });
+                            }}
+                            placeholder="pending, shipped, delivered"
+                            className={`w-full px-2 py-1 rounded border font-mono text-xs ${inputClass}`}
+                          />
+                        </div>
+
+                        {/* Preview of Generated DDL */}
+                        <div className="p-2 rounded bg-slate-900/80 border border-slate-800 font-mono text-[10px] text-slate-300 overflow-x-auto">
+                          <code>
+                            CREATE TYPE {ct.name} AS ENUM ({ct.values.map((v) => `'${v}'`).join(', ')});
+                          </code>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
           </div>
         </div>
       )}

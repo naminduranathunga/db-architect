@@ -365,12 +365,22 @@ export function createSampleWorksheet(name: string = 'unnamed_1', dialect: SqlDi
     },
   ];
 
+  const customTypes = dialect === 'pgsql' ? [
+    {
+      id: 'type_order_status',
+      name: 'order_status',
+      kind: 'ENUM' as const,
+      values: ['pending', 'shipped', 'delivered', 'cancelled'],
+    },
+  ] : [];
+
   return {
     id: `ws_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     name,
     dialect,
     tables,
     relations,
+    customTypes,
     createdAt: now,
     updatedAt: now,
     zoom: 1,

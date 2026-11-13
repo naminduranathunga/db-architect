@@ -74,12 +74,20 @@ export interface Relation {
   color?: string;
 }
 
+export interface CustomType {
+  id: string;
+  name: string; // e.g. "order_status"
+  kind: 'ENUM' | 'COMPOSITE'; // extensible for custom types
+  values: string[]; // e.g. ['pending', 'shipped', 'delivered']
+}
+
 export interface Worksheet {
   id: string;
   name: string; // e.g. "unnamed_1"
   dialect: SqlDialect;
   tables: Table[];
   relations: Relation[];
+  customTypes?: CustomType[]; // PostgreSQL custom ENUMs / data types
   createdAt: number;
   updatedAt: number;
   zoom?: number;
@@ -98,6 +106,7 @@ export const MYSQL_DATA_TYPES = [
   'TEXT',
   'LONGTEXT',
   'DECIMAL(10,2)',
+  'DECIMAL',
   'FLOAT',
   'DOUBLE',
   'BOOLEAN',
@@ -120,6 +129,8 @@ export const PGSQL_DATA_TYPES = [
   'VARCHAR(100)',
   'CHAR(36)',
   'TEXT',
+  'DECIMAL',
+  'DECIMAL(10,2)',
   'NUMERIC(10,2)',
   'REAL',
   'DOUBLE PRECISION',
